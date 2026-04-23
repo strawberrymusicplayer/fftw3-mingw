@@ -1,0 +1,268 @@
+name: Build
+on: [push, pull_request]
+
+env:
+  max_releases: '6'
+  curl_options: '-f -O -L --connect-timeout 60 -m 900 --retry 15 --retry-delay 10 --retry-max-time 300 --retry-all-errors'
+
+  fftw_version: '3.3.11'
+
+
+jobs:
+
+  setup:
+    name: Setup
+    if: (!contains(github.event.head_commit.message, 'skip ci'))
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{steps.set_release_tag.outputs.release_tag}}
+    steps:
+      - name: Set release tag
+        id: set_release_tag
+        shell: bash
+        run: echo "release_tag=${{env.fftw_version}}.${{github.run_number}}" >> $GITHUB_OUTPUT
+
+  build:
+    name: Build FFTW3 MinGW-W64
+    needs:
+      - setup
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "Windows x86_64 debug"
+            runner: windows-latest
+            arch: x86_64
+            buildtype: debug
+          - name: "Windows x86_64 release"
+            runner: windows-latest
+            arch: x86_64
+            buildtype: release
+
+    runs-on: ${{matrix.runner}}
+
+    steps:
+
+      - name: Show env
+        run: |
+          Get-ChildItem Env:
+
+      - name: Show PATH
+        shell: pwsh
+        run: $env:Path
+
+      - name: Set arch
+        shell: bash
+        run: echo "arch=${{matrix.arch}}" >> $GITHUB_ENV
+
+      - name: Set buildtype
+        shell: bash
+        run: echo "buildtype=$(echo ${{matrix.buildtype}} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Set cmake buildtype
+        shell: bash
+        run: echo "cmake_buildtype=$(echo ${{env.buildtype}} | sed 's/.*/\u&/')" >> $GITHUB_ENV
+
+      - name: Set release name
+        shell: bash
+        run: echo "release_name=fftw-mingw-${{env.arch}}-${{env.buildtype}}-${{needs.setup.outputs.release_tag}}" >> $GITHUB_ENV
+
+      - name: Set prefix path
+        shell: bash
+        run: |
+          echo "prefix_path_forwardslash=c:/${{env.release_name}}" >> $GITHUB_ENV
+          echo "prefix_path_backslash=c:\${{env.release_name}}" >> $GITHUB_ENV
+          echo "prefix_path_unix=/c/${{env.release_name}}" >> $GITHUB_ENV
+
+      - name: Set lib postfix
+        if: env.buildtype == 'debug'
+        shell: bash
+        run: echo "lib_postfix=d" >> $GITHUB_ENV
+
+      - name: Show variables
+        shell: bash
+        run: |
+          echo "arch: ${{env.arch}}"
+          echo "buildtype: ${{env.buildtype}}"
+          echo "cmake_buildtype: ${{env.cmake_buildtype}}"
+          echo "release_name: ${{env.release_name}}"
+          echo "prefix_path_forwardslash: ${{env.prefix_path_forwardslash}}"
+          echo "prefix_path_backslash: ${{env.prefix_path_backslash}}"
+          echo "prefix_path_unix: ${{env.prefix_path_unix}}"
+          echo "lib_postfix: ${{env.lib_postfix}}"
+
+      - name: Create directories
+        shell: bash
+        run: mkdir -p ${{env.prefix_path_unix}}/{lib,bin,include}
+
+      - name: Cleanup PATH
+        uses: egor-tensin/cleanup-path@v5
+        with:
+          dirs: C:\mingw64\bin;C:\Windows;C:\Windows\system32;C:\Program Files\CMake\bin;C:\Program Files\Git\bin;C:\Program Files\GitHub CLI
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Create directories
+        shell: bash
+        run: mkdir downloads build
+
+      - name: Show env
+        run: |
+          Get-ChildItem Env:
+
+      - name: Show PATH
+        shell: pwsh
+        run: $env:Path
+
+      - name: Download fftw
+        shell: bash
+        working-directory: downloads
+        run: |
+          curl ${{env.curl_options}} https://www.fftw.org/fftw-${{env.fftw_version}}.tar.gz || \
+          curl ${{env.curl_options}} https://downloads.sourceforge.net/project/fftw/fftw/${{env.fftw_version}}/fftw-${{env.fftw_version}}.tar.gz || \
+          curl ${{env.curl_options}} https://netix.dl.sourceforge.net/project/fftw/fftw/${{env.fftw_version}}/fftw-${{env.fftw_version}}.tar.gz || \
+          curl ${{env.curl_options}} https://packages.strawberrymusicplayer.org/fftw-${{env.fftw_version}}.tar.gz
+
+      - name: Extract fftw
+        shell: bash
+        working-directory: build
+        run: tar -xf ../downloads/fftw-${{env.fftw_version}}.tar.gz
+
+
+      - name: Configure fftw with autotools
+        if: false
+        shell: bash
+        working-directory: build/fftw-${{env.fftw_version}}
+        run: ./configure --prefix="${{env.prefix_path_unix}}" --disable-static --enable-shared --enable-threads --with-combined-threads --disable-doc --with-our-malloc --enable-sse2 --enable-avx --enable-avx2 --enable-avx512 --enable-avx-128-fma --enable-generic-simd128 --enable-generic-simd256
+
+      - name: Build fftw with autotools
+        if: false
+        shell: bash
+        working-directory: build/fftw-${{env.fftw_version}}
+        run: make -j ${{env.make_jobs}}
+
+      - name: Install fftw with autotools
+        if: false
+        shell: bash
+        working-directory: build/fftw-${{env.fftw_version}}
+        run: make install
+
+
+      - name: Configure fftw with CMake
+        shell: cmd
+        working-directory: build/fftw-${{env.fftw_version}}
+        run: >
+          cmake --log-level="DEBUG" -S . -B build -G "Unix Makefiles"
+          -DCMAKE_BUILD_TYPE="${{env.cmake_buildtype}}"
+          -DCMAKE_INSTALL_PREFIX=${{env.prefix_path_forwardslash}}
+          -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON
+          -DBUILD_SHARED_LIBS=ON
+          -DBUILD_TESTS=OFF
+          -DENABLE_THREADS=ON
+          -DWITH_COMBINED_THREADS=ON
+          -DENABLE_SSE=ON
+          -DENABLE_SSE2=ON
+          -DENABLE_AVX=ON
+          -DENABLE_AVX2=ON
+          -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          -DCMAKE_C_FLAGS="-DWITH_OUR_MALLOC -mavx -mavx2"
+
+      - name: Build fftw with CMake
+        shell: cmd
+        working-directory: build/fftw-${{env.fftw_version}}/build
+        run: cmake --build .
+
+      - name: Generate .def file with dlltool
+        if: false
+        shell: bash
+        working-directory: build/fftw-${{env.fftw_version}}/build
+        run: |
+          dlltool --output-def libfftw3.def libfftw3.dll.a
+          cat libfftw3.def
+
+      - name: Generate .def file with gendef
+        shell: bash
+        working-directory: build/fftw-${{env.fftw_version}}/build
+        run: |
+          gendef libfftw3.dll
+          cat libfftw3.def
+
+      - name: Generate MSVC import library
+        shell: pwsh
+        working-directory: build/fftw-${{env.fftw_version}}/build
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = (& $vswhere -latest -products * -property installationPath).Trim()
+          $libExe = Get-ChildItem -Path "$vsPath\VC\Tools\MSVC" -Recurse -Filter "lib.exe" | Where-Object { $_.FullName -match "Hostx64\\x64" } | Select-Object -First 1 -ExpandProperty FullName
+          Write-Host "Using lib.exe: $libExe"
+          & $libExe /def:libfftw3.def /out:"libfftw3.lib" /machine:x64
+
+      - name: Install fftw with CMake
+        shell: cmd
+        working-directory: build/fftw-${{env.fftw_version}}/build
+        run: |
+          cmake --install .
+          copy libfftw3.lib ${{env.prefix_path_backslash}}\lib\
+
+      - name: Create archive
+        shell: bash
+        run: tar -cJf ${{env.release_name}}.tar.xz --transform "s,^c/${{env.release_name}},${{env.release_name}}," ${{env.prefix_path_unix}}
+
+      - name: Set have release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        run: echo "have_release=$(gh release view "${{needs.setup.outputs.release_tag}}" | grep "${{needs.setup.outputs.release_tag}}" >/dev/null 2>&1 && echo 1 || echo 0)" >> $GITHUB_ENV
+
+      - name: Set release notes file
+        shell: bash
+        run: echo "release_notes_file=release_notes.txt" >> $GITHUB_ENV
+
+      - name: Create release notes
+        shell: bash
+        run: echo "FFTW ${{env.fftw_version}}" > "${{env.release_notes_file}}"
+
+      - name: Create new release
+        if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release') && env.have_release != '1'
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        run: gh release create -d -F "${{env.release_notes_file}}" -t "FFTW ${{env.fftw_version}} MinGW Release" "${{needs.setup.outputs.release_tag}}" "${{env.release_name}}.tar.xz"
+
+      - name: Update existing release
+        if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release') && env.have_release == '1'
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        run: gh release upload "${{needs.setup.outputs.release_tag}}" "${{env.release_name}}.tar.xz"
+
+
+  publish-release:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release'
+    needs:
+      - setup
+      - build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Publish Release
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        run: gh release edit --draft=false --latest "${{needs.setup.outputs.release_tag}}"
+
+      - name: Delete old releases
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        run: |
+          while [ "$(git tag | wc -l)" -ge "${{env.max_releases}}" ]; do
+            oldest_tag=$(git tag | sort -V | head -1)
+            gh release delete "${oldest_tag}"
+            git tag -d "${oldest_tag}"
+            git push --delete origin "${oldest_tag}"
+          done
