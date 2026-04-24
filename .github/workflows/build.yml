@@ -165,9 +165,10 @@ jobs:
           -DENABLE_SSE=ON
           -DENABLE_SSE2=ON
           -DENABLE_AVX=ON
-          -DENABLE_AVX2=ON
+          -DENABLE_AVX2=OFF
           -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-          -DCMAKE_C_FLAGS="-DWITH_OUR_MALLOC -mavx -mavx2"
+          -DCMAKE_C_FLAGS="-DWITH_OUR_MALLOC"
+          #-mavx -mavx2
 
       - name: Build fftw with CMake
         shell: cmd
