@@ -157,7 +157,6 @@ jobs:
           cmake --log-level="DEBUG" -S . -B build -G "Unix Makefiles"
           -DCMAKE_BUILD_TYPE="${{env.cmake_buildtype}}"
           -DCMAKE_INSTALL_PREFIX=${{env.prefix_path_forwardslash}}
-          -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON
           -DBUILD_SHARED_LIBS=ON
           -DBUILD_TESTS=OFF
           -DENABLE_THREADS=ON
