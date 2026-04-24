@@ -203,6 +203,7 @@ jobs:
         working-directory: build/fftw-${{env.fftw_version}}/build
         run: |
           cmake --install .
+          copy libfftw3.def ${{env.prefix_path_backslash}}\lib\
           copy libfftw3.lib ${{env.prefix_path_backslash}}\lib\
 
       - name: Create archive
